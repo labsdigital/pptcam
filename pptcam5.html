@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcam + 3 URL Panels</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        #layout { display: flex; height: 100vh; }
+        #sidebar {
+            width: 148px;
+            min-width: 148px;
+            display: flex;
+            flex-direction: column;
+            padding: 10px 6px;
+            gap: 8px;
+            background-color: #121212;
+            z-index: 100;
+        }
+        #main { flex: 1; position: relative; overflow: hidden; }
+
+        #video-wrap {
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: move;
+            background-color: #1e1e1e;
+            position: relative;
+            flex-shrink: 0;
+        }
+        #video-wrap .resize-handle {
+            position: absolute;
+            bottom: -4px;
+            right: -4px;
+            width: 10px;
+            height: 10px;
+            background-color: #444;
+            cursor: se-resize;
+            border-radius: 50%;
+            z-index: 10;
+        }
+        video {
+            display: block;
+            width: 136px;
+            height: 200px;
+            object-fit: cover;
+        }
+
+        #url-section { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        #url-display {
+            font-size: 9px;
+            color: #444;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 2px;
+            cursor: pointer;
+            transition: color 0.15s;
+            min-height: 14px;
+        }
+        #url-display:hover { color: #777; }
+        #url-input {
+            padding: 5px 6px;
+            border: none;
+            border-radius: 6px;
+            background-color: #1a1a1a;
+            color: #ccc;
+            outline: none;
+            font-size: 10px;
+            font-family: Arial, sans-serif;
+            width: 100%;
+        }
+        #url-input::placeholder { color: #333; }
+        #url-input:focus { background-color: #222; }
+
+        #navigator {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            padding: 6px 0;
+        }
+        .nav-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: #2a2a2a;
+            cursor: pointer;
+            transition: background-color 0.15s, transform 0.15s;
+            border: none;
+            padding: 0;
+        }
+        .nav-dot:hover { background-color: #555; transform: scale(1.15); }
+        .nav-dot.active { background-color: #ddd; transform: scale(1.1); }
+
+        .url-window {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: move;
+            display: none;
+        }
+        .url-window.active { display: block; }
+        .url-window iframe { width: 100%; height: 100%; border: none; border-radius: 10px; }
+        .url-window .resize-handle {
+            position: absolute;
+            bottom: -4px;
+            right: -4px;
+            width: 10px;
+            height: 10px;
+            background-color: #444;
+            cursor: se-resize;
+            border-radius: 50%;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="layout">
+        <div id="sidebar">
+            <div id="video-wrap">
+                <video id="video" autoplay></video>
+                <div class="resize-handle"></div>
+            </div>
+
+            <div id="url-section">
+                <div id="url-display" onclick="document.getElementById('url-input').focus()"></div>
+                <input type="text" id="url-input" placeholder="ESC to toggle">
+            </div>
+
+            <div id="navigator">
+                <button class="nav-dot active" data-index="0"></button>
+                <button class="nav-dot" data-index="1"></button>
+                <button class="nav-dot" data-index="2"></button>
+            </div>
+        </div>
+
+        <div id="main">
+            <div class="url-window active" id="window-0"><iframe id="iframe-0"></iframe><div class="resize-handle"></div></div>
+            <div class="url-window" id="window-1"><iframe id="iframe-1"></iframe><div class="resize-handle"></div></div>
+            <div class="url-window" id="window-2"><iframe id="iframe-2"></iframe><div class="resize-handle"></div></div>
+        </div>
+    </div>
+
+    <script>
+        const urls = [
+            'https://www.rumahguru.org/tools/ppt.php',
+            'about:blank',
+            'about:blank'
+        ];
+        let activeIndex = 0;
+        let urlBarVisible = true;
+
+        async function startWebcam() {
+            try { document.getElementById('video').srcObject = await navigator.mediaDevices.getUserMedia({ video: true }); }
+            catch (e) { console.error('Webcam error:', e); }
+        }
+
+        function makeDraggable(el) {
+            let d = false, ox, oy;
+            el.addEventListener('mousedown', e => {
+                if (e.target.classList.contains('resize-handle')) return;
+                d = true; ox = e.clientX - el.getBoundingClientRect().left; oy = e.clientY - el.getBoundingClientRect().top;
+            });
+            document.addEventListener('mousemove', e => { if (d) { el.style.left = e.clientX - ox + 'px'; el.style.top = e.clientY - oy + 'px'; } });
+            document.addEventListener('mouseup', () => { d = false; });
+        }
+
+        function makeResizable(el, isVid) {
+            const h = el.querySelector('.resize-handle');
+            let r = false, oW, oH, oX, oY;
+            h.addEventListener('mousedown', e => { e.stopPropagation(); r = true; oW = el.offsetWidth; oH = el.offsetHeight; oX = e.clientX; oY = e.clientY; });
+            document.addEventListener('mousemove', e => { if (!r) return; if (isVid) { const v = document.getElementById('video'); v.style.width = oW + e.clientX - oX + 'px'; v.style.height = oH + e.clientY - oY + 'px'; } else { el.style.width = oW + e.clientX - oX + 'px'; el.style.height = oH + e.clientY - oY + 'px'; } });
+            document.addEventListener('mouseup', () => { r = false; });
+        }
+
+        function switchTab(i) {
+            activeIndex = i;
+            document.querySelectorAll('.url-window').forEach((w, j) => w.classList.toggle('active', j === i));
+            document.querySelectorAll('.nav-dot').forEach((d, j) => d.classList.toggle('active', j === i));
+            syncInputToActiveTab();
+        }
+
+        function syncInputToActiveTab() {
+            const inp = document.getElementById('url-input');
+            const disp = document.getElementById('url-display');
+            const url = urls[activeIndex];
+            inp.value = url === 'about:blank' ? '' : url;
+            disp.textContent = url === 'about:blank' ? '' : url;
+        }
+
+        function loadUrl() {
+            const raw = document.getElementById('url-input').value.trim();
+            if (!raw) return;
+            const url = raw.startsWith('http') ? raw : 'https://' + raw;
+            urls[activeIndex] = url;
+            const iframe = document.getElementById(`iframe-${activeIndex}`);
+            iframe.src = 'about:blank';
+            setTimeout(() => { iframe.src = url; }, 30);
+            syncInputToActiveTab();
+        }
+
+        function toggleUrlBar() {
+            urlBarVisible = !urlBarVisible;
+            document.getElementById('url-section').style.display = urlBarVisible ? 'flex' : 'none';
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            startWebcam();
+            makeDraggable(document.getElementById('video-wrap'));
+            makeResizable(document.getElementById('video-wrap'), true);
+            document.querySelectorAll('.url-window').forEach(w => { makeDraggable(w); makeResizable(w, false); });
+            document.querySelectorAll('.nav-dot').forEach(d => d.addEventListener('click', () => switchTab(+d.dataset.index)));
+            document.getElementById('url-input').addEventListener('keydown', e => { if (e.key === 'Enter') loadUrl(); });
+            document.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); toggleUrlBar(); } });
+            urls.forEach((url, i) => { document.getElementById(`iframe-${i}`).src = url; });
+            syncInputToActiveTab();
+        });
+    </script>
+</body>
+</html>
